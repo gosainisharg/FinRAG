@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finrag"
+version = "0.1.0"
+description = "Production agentic RAG over SEC filings"
+readme = "README.md"
+requires-python = ">=3.11"
+
+# Core runtime. Bounded below at the version whose API we target, and above at the
+# next major, so `pip install -U` picks up patches but never a breaking release.
+dependencies = [
+    # --- orchestration ---
+    "langchain>=1.0,<2",
+    "langgraph>=1.2,<2",
+    "langchain-core>=1.0,<2",
+    # --- providers (the three swappable backends) ---
+    "langchain-openai>=1.0,<2",
+    "langchain-anthropic>=1.0,<2",
+    "langchain-ollama>=1.0,<2",
+    # --- retrieval ---
+    "langchain-chroma>=1.0,<2",
+    "chromadb>=1.0,<2",
+    "sentence-transformers>=3.0,<6",
+    "rank-bm25>=0.2.2,<0.3",
+    # --- ingestion ---
+    "pymupdf>=1.24,<2",
+    "langchain-text-splitters>=1.0,<2",
+    # --- serving ---
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "sse-starlette>=2.1,<4",
+    # --- config & validation ---
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.5,<3",
+    "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+# Evaluation harness. Separated because CI's fast lane does not need it and the
+# install is heavy.
+eval = [
+    "ragas>=0.4,<0.5",
+    "deepeval>=3.0,<4",
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<2",
+    "datasets>=3.0,<5",
+]
+
+# Tracing. Optional so the service runs with observability switched off.
+obs = [
+    "langsmith>=0.2,<1",
+    "arize-phoenix>=6.0,<12",
+    "openinference-instrumentation-langchain>=0.1,<1",
+    "opentelemetry-sdk>=1.27,<2",
+    "opentelemetry-exporter-otlp>=1.27,<2",
+]
+
+dev = [
+    "ruff>=0.7,<1",
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<2",
+    "httpx>=0.27,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "eval"]
+asyncio_mode = "auto"
+markers = [
+    "llm: test performs a real LLM call (costs money, excluded from the fast CI lane)",
+]

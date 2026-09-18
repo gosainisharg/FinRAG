@@ -84,14 +84,14 @@ finrag/
 
 ### Phase 0 — Foundations
 - [x] `.gitignore` committed before anything else
-- [ ] Python 3.13 venv
-- [ ] `pyproject.toml` with pinned dependencies
-- [ ] `config.py` on pydantic-settings, `.env.example`
-- [ ] `llm.py` provider factory (`openai` / `anthropic` / `llama`; LLaMA branch stubbed)
-- [ ] Original four modules relocated to `legacy/`
+- [x] Python 3.13 venv
+- [x] `pyproject.toml` with pinned dependencies
+- [x] `config.py` on pydantic-settings, `.env.example`
+- [x] `llm.py` provider factory (`openai` / `anthropic` / `llama`; LLaMA branch stubbed)
+- [x] Original four modules relocated to `legacy/`
 
 > **Exit:** one script answers a trivial prompt from OpenAI *and* Anthropic by changing a single
-> config value.
+> config value. — `scripts/check_setup.py --live`; **pending API keys**.
 
 ### Phase 1 — Ingestion quality
 - [ ] PyMuPDF replaces PyPDF so financial tables survive extraction
