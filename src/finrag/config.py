@@ -67,11 +67,11 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------ models
     # Format is "provider:model". Overridable per role, e.g. FINRAG_GENERATOR_MODEL=...
-    router_model: str = "openai:gpt-4o-mini"
-    grader_model: str = "openai:gpt-4o-mini"
-    rewriter_model: str = "openai:gpt-4o-mini"
+    router_model: str = "openai:gpt-5.4-nano"
+    grader_model: str = "openai:gpt-5.4-nano"
+    rewriter_model: str = "openai:gpt-5.4-nano"
     generator_model: str = "anthropic:claude-sonnet-5"
-    judge_model: str = "openai:gpt-4o"
+    judge_model: str = "openai:gpt-5.4"
 
     temperature: float = 0.0
     max_tokens: int = 2048

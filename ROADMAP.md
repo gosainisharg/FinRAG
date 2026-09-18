@@ -90,10 +90,14 @@ finrag/
 - [x] `llm.py` provider factory (`openai` / `anthropic` / `llama`; LLaMA branch stubbed)
 - [x] Original four modules relocated to `legacy/`
 
-> **Exit:** `scripts/check_setup.py --live`. The role-swap mechanism is proven and the
-> locally-served LLaMA backend answers. **OpenAI and Anthropic remain unverified pending
-> API keys** — the factory raises a clear, role-specific error for each rather than failing
-> obscurely.
+> **Exit: met.** `scripts/check_setup.py --live` gets real answers from OpenAI and from the
+> locally-served LLaMA backend, and `FINRAG_LOCAL_ONLY` swaps every role between them with
+> one variable. Anthropic is wired but unpurchased; the factory raises a clear, role-specific
+> error rather than failing obscurely.
+>
+> **Open item:** with OpenAI only, generator and judge share a model family, so
+> LLM-as-judge scores in Phase 6 will be inflated by self-preference bias to an unknown
+> degree. ~$5 of Anthropic credit resolves it. Tracked in `.env`.
 
 ### Phase 1 — Ingestion quality
 - [ ] PyMuPDF replaces PyPDF so financial tables survive extraction
