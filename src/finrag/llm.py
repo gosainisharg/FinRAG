@@ -26,8 +26,33 @@ _RUNTIME_FOR_PROVIDER: dict[Provider, str] = {
 }
 
 
+# Anthropic removed the sampling parameters (temperature / top_p / top_k) on its current
+# frontier models; sending `temperature` to one returns a 400. They remain valid on Sonnet
+# 4.6, Haiku 4.5 and older. Matched by prefix so point releases are covered without edits.
+_SAMPLING_REMOVED_PREFIXES = (
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-sonnet-5",
+)
+
+
 class ModelConfigError(RuntimeError):
     """Raised for a malformed model spec or a missing credential."""
+
+
+def supports_sampling_params(provider: Provider, model_name: str) -> bool:
+    """Whether a model accepts `temperature`.
+
+    Only Anthropic has removed it so far. Returning True for anything unrecognised keeps
+    the failure mode loud — a 400 naming the parameter — rather than silently dropping a
+    setting the caller asked for.
+    """
+    if provider is not Provider.ANTHROPIC:
+        return True
+    return not model_name.startswith(_SAMPLING_REMOVED_PREFIXES)
 
 
 def parse_model_spec(spec: str) -> tuple[Provider, str]:
@@ -98,9 +123,15 @@ def build_chat_model(spec: str, settings: Settings | None = None, **overrides) -
     kwargs: dict = {
         "model": model_name,
         "model_provider": _RUNTIME_FOR_PROVIDER[provider],
-        "temperature": settings.temperature,
         "timeout": settings.request_timeout_s,
     }
+
+    # Omit rather than send-and-fail on models that no longer accept it. Evals lose a
+    # determinism lever on those models; that is the provider's decision, not ours.
+    # Only Anthropic needs this guard: langchain-openai already strips temperature for
+    # the gpt-5 family internally, while langchain-anthropic forwards it and gets a 400.
+    if supports_sampling_params(provider, model_name):
+        kwargs["temperature"] = settings.temperature
 
     if provider is Provider.LLAMA:
         kwargs["base_url"] = settings.ollama_base_url

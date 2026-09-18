@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 
 from finrag.config import ModelRole, Provider, Settings
-from finrag.llm import ModelConfigError, _credential_for, parse_model_spec
+from finrag.llm import (
+    ModelConfigError,
+    _credential_for,
+    build_chat_model,
+    parse_model_spec,
+    supports_sampling_params,
+)
 
 
 class TestParseModelSpec:
@@ -110,3 +116,45 @@ class TestLocalOnly:
         for role in ModelRole:
             provider, _ = parse_model_spec(settings.model_for(role))
             assert _credential_for(provider, settings) is None
+
+
+class TestSamplingParameterSupport:
+    """Anthropic removed temperature/top_p/top_k on its current frontier models."""
+
+    @pytest.mark.parametrize(
+        "model", ["claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-fable-5-1"]
+    )
+    def test_current_anthropic_models_reject_sampling(self, model):
+        assert supports_sampling_params(Provider.ANTHROPIC, model) is False
+
+    @pytest.mark.parametrize("model", ["claude-sonnet-4-6", "claude-haiku-4-5"])
+    def test_older_anthropic_models_still_accept_sampling(self, model):
+        assert supports_sampling_params(Provider.ANTHROPIC, model) is True
+
+    @pytest.mark.parametrize(
+        "provider, model",
+        [(Provider.OPENAI, "gpt-5.4"), (Provider.LLAMA, "llama3.1:8b")],
+    )
+    def test_other_providers_are_unaffected(self, provider, model):
+        assert supports_sampling_params(provider, model) is True
+
+    def test_temperature_is_omitted_for_models_that_reject_it(self):
+        settings = Settings(_env_file=None, ANTHROPIC_API_KEY="sk-test")
+        model = build_chat_model("anthropic:claude-sonnet-5", settings)
+        assert getattr(model, "temperature", None) is None
+
+    def test_temperature_is_sent_where_supported(self):
+        settings = Settings(_env_file=None, OPENAI_API_KEY="sk-test", temperature=0.0)
+        model = build_chat_model("openai:gpt-4o-mini", settings)
+        assert model.temperature == 0.0
+
+    def test_langchain_openai_strips_temperature_for_gpt5_itself(self):
+        """Documents why no guard is needed on the OpenAI side.
+
+        langchain-openai drops `temperature` for the gpt-5 family internally, so our
+        factory can pass it unconditionally there. langchain-anthropic does not do the
+        equivalent, which is why `supports_sampling_params` exists. If this test ever
+        fails, langchain-openai changed and the guard may need to cover OpenAI too.
+        """
+        settings = Settings(_env_file=None, OPENAI_API_KEY="sk-test", temperature=0.7)
+        assert build_chat_model("openai:gpt-5.4", settings).temperature is None
