@@ -14,6 +14,7 @@ import sys
 
 from finrag.config import ModelRole, Provider, get_settings
 from finrag.llm import ModelConfigError, build_chat_model, describe_configuration, parse_model_spec
+from finrag.observability.tracing import configure_tracing
 
 OK, FAIL, SKIP = "\033[32m✓\033[0m", "\033[31m✗\033[0m", "\033[33m-\033[0m"
 PROBE = "Reply with exactly one word: ok"
@@ -48,8 +49,12 @@ def show_configuration() -> set[Provider]:
         )
     print(f"  {SKIP} {'llama':<10} no credential needed — served locally by Ollama")
 
-    print(f"\n  tracing: langsmith={settings.langsmith_tracing} phoenix={settings.phoenix_enabled}")
-    print(f"  chroma:  {settings.chroma_dir}")
+    print("\nObservability")
+    print("─" * 52)
+    status = configure_tracing(settings)
+    print(f"  {OK if status.langsmith_enabled else SKIP} {str(status)}")
+    print(f"  {SKIP} phoenix / OpenTelemetry  not wired yet (Phase 9)")
+    print(f"\n  chroma:  {settings.chroma_dir}")
     return providers
 
 
