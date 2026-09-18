@@ -90,8 +90,10 @@ finrag/
 - [x] `llm.py` provider factory (`openai` / `anthropic` / `llama`; LLaMA branch stubbed)
 - [x] Original four modules relocated to `legacy/`
 
-> **Exit:** one script answers a trivial prompt from OpenAI *and* Anthropic by changing a single
-> config value. — `scripts/check_setup.py --live`; **pending API keys**.
+> **Exit:** `scripts/check_setup.py --live`. The role-swap mechanism is proven and the
+> locally-served LLaMA backend answers. **OpenAI and Anthropic remain unverified pending
+> API keys** — the factory raises a clear, role-specific error for each rather than failing
+> obscurely.
 
 ### Phase 1 — Ingestion quality
 - [ ] PyMuPDF replaces PyPDF so financial tables survive extraction
@@ -134,6 +136,7 @@ finrag/
 |---|:--:|:--:|
 | llama3.2:3b | 9/15 | 12/15 |
 | mistral:7b | 6/15 | **15/15** |
+| llama3.1:8b | 6/15 | **15/15** |
 
 Schema compliance was 15/15 everywhere — small models handle Pydantic-structured output
 fine. Accuracy is entirely a prompting problem, and prompt quality dominated model size:
@@ -157,7 +160,10 @@ the README.
 > **before/after column**.
 
 ### Phase 5b — LLaMA backend
-- [ ] Third provider wired (LLaMA, served locally via Ollama)
+- [x] Third provider wired (LLaMA, served locally via Ollama) — *pulled forward into Phase 0*
+- [x] `FINRAG_LOCAL_ONLY=true` collapses every role onto the local model: one switch for
+      free, offline, credential-less development
+- [ ] Full graph answers a golden-set question locally *(blocked on the graph existing)*
 
 > **Exit:** the full graph answers a golden-set question end to end with nothing leaving the
 > machine.

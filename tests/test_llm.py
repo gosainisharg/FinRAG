@@ -85,3 +85,28 @@ class TestSettings:
         monkeypatch.setenv("FINRAG_GENERATOR_MODEL", "llama:llama3.2")
         settings = Settings(_env_file=None)
         assert settings.model_for(ModelRole.GENERATOR) == "llama:llama3.2"
+
+
+class TestLocalOnly:
+    def test_disabled_by_default(self):
+        settings = Settings(_env_file=None)
+        assert settings.local_only is False
+        assert settings.model_for(ModelRole.GENERATOR) != settings.local_model
+
+    def test_collapses_every_role_onto_the_local_model(self):
+        settings = Settings(_env_file=None, local_only=True)
+        for role in ModelRole:
+            assert settings.model_for(role) == settings.local_model
+
+    def test_overrides_per_role_environment_variables(self, monkeypatch):
+        # The switch must win, or a stray variable could still bill a hosted provider.
+        monkeypatch.setenv("FINRAG_GENERATOR_MODEL", "anthropic:claude-sonnet-5")
+        monkeypatch.setenv("FINRAG_LOCAL_ONLY", "true")
+        settings = Settings(_env_file=None)
+        assert settings.model_for(ModelRole.GENERATOR) == settings.local_model
+
+    def test_local_only_needs_no_credentials(self):
+        settings = Settings(_env_file=None, local_only=True)
+        for role in ModelRole:
+            provider, _ = parse_model_spec(settings.model_for(role))
+            assert _credential_for(provider, settings) is None

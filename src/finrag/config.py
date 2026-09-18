@@ -14,7 +14,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -81,7 +81,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     # Default locally-served model. Used by scripts/check_setup.py and as the zero-cost
     # target when developing against LLaMA instead of a hosted provider.
-    local_model: str = "llama:llama3.2:3b"
+    local_model: str = "llama:llama3.1:8b"
+    # Point every role at `local_model`, ignoring the per-role settings. One switch for
+    # running the entire pipeline free of charge and offline.
+    local_only: bool = False
 
     # ------------------------------------------------------------------ retrieval
     embedding_model: str = "BAAI/bge-large-en-v1.5"
@@ -134,6 +137,19 @@ class Settings(BaseSettings):
         if not 0.0 <= v <= 1.0:
             raise ValueError("cache_similarity_threshold must be between 0.0 and 1.0")
         return v
+
+    @model_validator(mode="after")
+    def _apply_local_only(self) -> Settings:
+        """Collapse every role onto the local model when ``local_only`` is set.
+
+        Applied after field validation so it overrides anything the environment supplied,
+        which is the point: one switch, no chance a stray per-role variable still bills a
+        hosted provider.
+        """
+        if self.local_only:
+            for role in ModelRole:
+                setattr(self, f"{role.value}_model", self.local_model)
+        return self
 
     def model_for(self, role: ModelRole) -> str:
         """Return the configured ``provider:model`` spec for a role."""
