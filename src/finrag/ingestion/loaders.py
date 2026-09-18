@@ -37,6 +37,11 @@ from finrag.ingestion.metadata import FilingMetadata, extract_filing_metadata
 # the title / units / period / year-header stack seen on statement pages without reaching
 # into the previous paragraph.
 PREAMBLE_GAP_PT = 80.0
+# A caption is a stack of short lines. A long block directly above a table is the end of
+# the preceding paragraph, not a caption, and absorbing it buries the figures under
+# unrelated prose and mislabels that prose as part of a table.
+MAX_CAPTION_LINE_CHARS = 150
+MAX_CAPTION_CHARS = 600
 
 # A text block this fraction inside a table's bounding box is considered part of it.
 # Partial overlap is common at table edges, so a bare intersection test drops neighbouring
@@ -150,6 +155,19 @@ def _find_year_header(preamble: str, column_count: int) -> list[str] | None:
     return None
 
 
+def _looks_like_header(row: list[str]) -> bool:
+    """Whether a row reads as column names rather than data.
+
+    Promoting a data row to the header is silent corruption: the figures survive but
+    markdown presents them as column labels, and the row itself stops reading as data.
+    """
+    values = [cell for cell in row[1:] if cell]
+    if not values:
+        return False
+    textual = sum(not re.search(r"\d", cell) for cell in values)
+    return textual / len(values) >= 0.6
+
+
 def _render_table(rows: list[list[str]], preamble: str) -> str:
     """Render a table as markdown, using year headers from the caption when available."""
     if not rows:
@@ -161,9 +179,14 @@ def _render_table(rows: list[list[str]], preamble: str) -> str:
     if years:
         header = ["", *years]
         body = rows
-    else:
+    elif _looks_like_header(rows[0]):
         header = rows[0]
         body = rows[1:]
+    else:
+        # No recoverable header. An empty one keeps every data row as data; the periods
+        # are still named in the caption directly above.
+        header = [""] * width
+        body = rows
 
     lines = [
         "| " + " | ".join(header) + " |",
@@ -206,16 +229,27 @@ def _preamble_for(blocks: list[tuple], table_rect: pymupdf.Rect) -> tuple[str, s
     element and once as standalone prose, producing near-duplicate retrievals that crowd
     out genuinely different context.
     """
-    found: list[tuple[float, str]] = []
-    consumed: set[int] = set()
+    candidates: list[tuple[float, int, str]] = []
     for index, (x0, y0, x1, y1, text, *_) in enumerate(blocks):
         block = pymupdf.Rect(x0, y0, x1, y1)
         above = y1 <= table_rect.y0 + 2
         near = table_rect.y0 - y1 <= PREAMBLE_GAP_PT
         horizontally_related = block.x0 < table_rect.x1 and block.x1 > table_rect.x0
         if above and near and horizontally_related and text.strip():
-            found.append((y0, text.strip()))
-            consumed.add(index)
+            candidates.append((y0, index, text.strip()))
+
+    # Walk upwards from the table. Stop at the first long block: that is the previous
+    # paragraph, and everything above it belongs to the preceding text, not this table.
+    found: list[tuple[float, str]] = []
+    consumed: set[int] = set()
+    total = 0
+    for y0, index, text in sorted(candidates, reverse=True):
+        if len(text) > MAX_CAPTION_LINE_CHARS or total + len(text) > MAX_CAPTION_CHARS:
+            break
+        found.append((y0, text))
+        consumed.add(index)
+        total += len(text)
+
     return "\n".join(text for _, text in sorted(found)), consumed
 
 
