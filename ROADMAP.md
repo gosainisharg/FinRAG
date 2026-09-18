@@ -197,9 +197,15 @@ the README.
 > returns from cache with measurably lower latency.
 
 ### Phase 9 — Observability
-- [ ] LangSmith behind an env flag
+- [x] LangSmith behind an env flag — *pulled forward into Phase 0*; verified end to end by
+      querying the LangSmith API for landed runs, not just by checking env vars
 - [ ] OTel → Phoenix via `openinference-instrumentation-langchain`
 - [ ] Custom spans for cache hit/miss and retry count
+
+> **Privacy note:** `FINRAG_LOCAL_ONLY=true` keeps *inference* on the machine, but tracing is
+> independent — with `LANGSMITH_TRACING=true`, prompts and completions from the local LLaMA
+> backend are still uploaded to LangSmith. Fully offline operation needs both
+> `LOCAL_ONLY=true` **and** `LANGSMITH_TRACING=false`.
 
 > **Exit:** one request produces a complete span tree in Phoenix; the node responsible for any
 > given answer is identifiable.
