@@ -128,6 +128,24 @@ finrag/
 
 > **Exit:** changing a prompt version string changes behaviour without touching node code.
 
+**Measured during Phase 0** (5 grader cases x 3 trials, locally-served models, zero cost):
+
+| model | naive prompt | engineered prompt |
+|---|:--:|:--:|
+| llama3.2:3b | 9/15 | 12/15 |
+| mistral:7b | 6/15 | **15/15** |
+
+Schema compliance was 15/15 everywhere — small models handle Pydantic-structured output
+fine. Accuracy is entirely a prompting problem, and prompt quality dominated model size:
+the naive prompt made the *larger* model worse. The failure mode both models shared was
+answering `sufficient: true` for questions the context could not answer, which would leave
+the corrective loop silently never firing. The engineered prompt fixes this by defining
+sufficiency explicitly and instructing the grader to prefer `false` when uncertain — a
+false `false` only costs another search, while a false `true` fabricates an answer.
+
+This is the empirical case for versioning prompts and evaluating them, and it belongs in
+the README.
+
 ### Phase 5 — The agentic graph
 - [ ] `GraphState` with attempt counter
 - [ ] Nodes: route → retrieve → grade → rewrite → generate

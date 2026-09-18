@@ -62,7 +62,7 @@ def probe(providers: set[Provider]) -> bool:
     specs = {
         Provider.OPENAI: settings.model_for(ModelRole.ROUTER),
         Provider.ANTHROPIC: settings.model_for(ModelRole.GENERATOR),
-        Provider.LLAMA: "llama:llama3.2",
+        Provider.LLAMA: settings.local_model,
     }
 
     all_passed = True
@@ -81,7 +81,8 @@ def probe(providers: set[Provider]) -> bool:
         except Exception as exc:  # noqa: BLE001 - surface any backend failure verbatim
             hint = ""
             if provider is Provider.LLAMA:
-                hint = "\n      is Ollama running? `ollama serve` then `ollama pull llama3.2`"
+                model = spec.partition(":")[2]
+                hint = f"\n      is Ollama running? `ollama serve`, then `ollama pull {model}`"
             print(
                 f"  {FAIL} {provider.value:<10} {spec}\n      "
                 f"{type(exc).__name__}: {str(exc)[:160]}{hint}"

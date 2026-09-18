@@ -79,6 +79,9 @@ class Settings(BaseSettings):
 
     # Where the Ollama runtime is listening, for the LLaMA backend.
     ollama_base_url: str = "http://localhost:11434"
+    # Default locally-served model. Used by scripts/check_setup.py and as the zero-cost
+    # target when developing against LLaMA instead of a hosted provider.
+    local_model: str = "llama:llama3.2:3b"
 
     # ------------------------------------------------------------------ retrieval
     embedding_model: str = "BAAI/bge-large-en-v1.5"
