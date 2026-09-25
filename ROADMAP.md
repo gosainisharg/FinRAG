@@ -114,11 +114,24 @@ finrag/
 > policies — now labelled so retrieval can exclude them rather than answering a revenue
 > question from a stock plan.
 >
-> **Limitation on record:** table detection needs ruling lines, so Costco's
-> whitespace-aligned statements fall through to prose (1 table vs Tesla's 56). The
-> `text` strategy was measured and rejected — it shatters headings mid-word and
-> hallucinates an 89-row table on every prose page. Costco's prose keeps label-value
-> adjacency, so it degrades rather than breaks.
+> **Extraction backend replaced (revisited during Phase 3).** `find_tables()` only
+> detects tables the PDF draws with ruling lines. That missed the *primary financial
+> statements* of Apple and Costco — roughly half the corpus — which arrived as prose
+> with labels and figures on separate lines. Extraction now runs through
+> `pymupdf4llm.to_markdown`. All six filings now tabulate their headline revenue row:
+>
+> | filing | row |
+> |---|---|
+> | Tesla FY23 | `\|Total revenues\|96,773\|81,462\|53,823\|` |
+> | Apple FY24 | `\|Total net sales\|$ 391,035\|2 %\|$ 383,285\|` |
+> | Costco FY23 | `\|Total revenue \|242,290\|226,954\|195,929\|` |
+>
+> Costco went from 1 detected table to 51. Corpus is now 1,145 chunks, 257 tables.
+> A parametrised test pins the headline row of every filing so this cannot regress.
+>
+> **Rejected:** merely *importing* pymupdf4llm changes `find_tables` globally and
+> corrupts raw cell text — labels lose spaces (`Automotivesales`), commas migrate onto
+> newlines. The library is only safe used as the primary API.
 
 ### Phase 2 — Retrieval layer
 - [x] `retrieve(query, strategy, filters, k) -> list[RetrievedChunk]` as the single entry point

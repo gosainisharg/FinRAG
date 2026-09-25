@@ -27,6 +27,9 @@ dependencies = [
     "rank-bm25>=0.2.2,<0.3",
     # --- ingestion ---
     "pymupdf>=1.24,<2",
+    # Layout-aware markdown conversion. find_tables() alone only detects tables drawn
+    # with ruling lines, which missed the primary financial statements in half the corpus.
+    "pymupdf4llm>=0.0.17,<2",
     "langchain-text-splitters>=1.0,<2",
     # --- serving ---
     "fastapi>=0.115,<1",

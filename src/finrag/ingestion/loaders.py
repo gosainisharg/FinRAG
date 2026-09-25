@@ -4,65 +4,59 @@ Plain text extraction flattens a table into an unlabelled column of numbers: `96
 survives, but its association with "Total revenues" and with the year 2023 does not. An
 answer generated from that is a guess dressed as a citation.
 
-This module splits each page into two kinds of element:
+Extraction runs through ``pymupdf4llm.to_markdown``, which does layout-aware conversion and
+renders tables as markdown. The earlier implementation called ``page.find_tables()``
+directly and detected tables only where the PDF draws ruling lines — which meant Apple's
+and Costco's primary financial statements, roughly half the corpus, came through as
+linearised prose with labels and figures on separate lines.
 
-- **tables**, recovered structurally via ``find_tables()`` and rendered as markdown,
-  carrying the text immediately above them — statement title, units, year headers — because
-  that is where the scale and the period live. A figure without "(in millions)" is off by
-  six orders of magnitude.
-- **prose**, everything else, with the table regions removed so the same content is not
-  indexed twice in two different shapes.
+Each page is split into two kinds of element:
 
-Known limitation: table detection uses the ``lines`` strategy, which needs ruling lines.
-Costco's filing draws its statements with whitespace alignment alone, so its tables are
-not detected and fall through to prose. The ``text`` strategy was measured and rejected —
-it shatters Costco's headings mid-word (``CONSOLIDATED | STATEME | NTS OF I | NCOME``) and
-hallucinates an 89-row table on every prose page of the Tesla filing. Costco's prose
-extraction keeps label-value adjacency, so it degrades rather than breaks.
+- **tables**, kept as markdown and carrying the text immediately above them — statement
+  title, units, period — because that is where the scale lives. A figure without
+  "(in millions)" is wrong by six orders of magnitude.
+- **prose**, everything else, with caption lines removed so the same text is not indexed
+  twice in two different shapes.
+
+Note: importing ``pymupdf4llm`` also changes ``pymupdf.Page.find_tables`` behaviour
+globally and degrades raw cell text — labels lose their spaces ("Automotivesales") and
+commas migrate onto newlines. Nothing here calls ``find_tables``; if that ever changes,
+read the extraction tests before trusting the output.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
+import logging
 import re
-from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-import pymupdf
+import pymupdf4llm
 
 from finrag.ingestion.metadata import FilingMetadata, extract_filing_metadata
 
-# How far above a table to look for its caption, in PDF points (~1/72 inch). 80pt covers
-# the title / units / period / year-header stack seen on statement pages without reaching
-# into the previous paragraph.
-PREAMBLE_GAP_PT = 80.0
+logger = logging.getLogger(__name__)
+
 # A caption is a stack of short lines. A long block directly above a table is the end of
-# the preceding paragraph, not a caption, and absorbing it buries the figures under
-# unrelated prose and mislabels that prose as part of a table.
+# the preceding paragraph, not a caption; absorbing it buries the figures under unrelated
+# prose and mislabels that prose as part of a table.
 MAX_CAPTION_LINE_CHARS = 150
 MAX_CAPTION_CHARS = 600
 
-# A text block this fraction inside a table's bounding box is considered part of it.
-# Partial overlap is common at table edges, so a bare intersection test drops neighbouring
-# prose that merely touches the border.
-TABLE_OVERLAP_RATIO = 0.5
-
-_YEAR_LINE = re.compile(r"^\s*(19|20)\d{2}\s*$")
-# Cells that carry formatting rather than data. Dropping them is what lets every row
-# be packed to the same width, so a column means the same period in every row.
-_NON_DATA_CELLS = frozenset({"$", "%", "(", ")", "", "—", "-"})
 # Dot leaders ("Net sales . . . . . . . 237,710") are typographic filler. They cost tokens
 # and add nothing an embedding can use, so they are collapsed on the way in.
 _DOT_LEADER = re.compile(r"(?:\s*\.){3,}\s*")
 
 # Standard Unicode ligatures. Always safe to expand.
 _UNICODE_LIGATURES = {
-    "\ufb00": "ff",
-    "\ufb01": "fi",
-    "\ufb02": "fl",
-    "\ufb03": "ffi",
-    "\ufb04": "ffl",
+    "ﬀ": "ff",
+    "ﬁ": "fi",
+    "ﬂ": "fl",
+    "ﬃ": "ffi",
+    "ﬄ": "ffl",
 }
 
 # One filing's font encoding maps ligature glyphs onto Latin-1 accented characters, so
@@ -74,6 +68,33 @@ _MISDECODED_LIGATURES = {"í": "fi", "ì": "ff", "î": "fl"}
 _MISDECODED_PATTERN = re.compile(
     "|".join(f"(?<=[A-Za-z]){c}|{c}(?=[A-Za-z])" for c in _MISDECODED_LIGATURES)
 )
+
+# The same filing also yields U+FFFD for those glyphs depending on the extraction path,
+# and U+FFFD is ambiguous — it stands for fi, ff or fl alike. Context disambiguates every
+# occurrence in this corpus:
+#   word-initial + "o"  -> fl   (flow)
+#   word-initial        -> fi   (financial, filed, find, first)
+#   mid-word + vowel    -> ff   (efforts, differ, affecting)
+#   mid-word + consonant-> fi   (artificial, specific, profile)
+_REPLACEMENT_CHAR = re.compile(r"(?P<before>[A-Za-z]?)\ufffd(?P<after>[A-Za-z])")
+_VOWELS = frozenset("aeiou")
+
+
+def _expand_replacement_char(match: re.Match[str]) -> str:
+    before, after = match.group("before"), match.group("after")
+    if not before:  # word-initial
+        return ("fl" if after.lower() == "o" else "fi") + after
+    return before + ("ff" if after.lower() in _VOWELS else "fi") + after
+
+
+# Markdown decoration carries no meaning for retrieval, and emphasis markers split tokens
+# for BM25 — "**Total**" would not match a query for "total".
+_EMPHASIS = re.compile(r"\*{1,3}")
+_HEADING = re.compile(r"^#{1,6}\s*", re.MULTILINE)
+_LINE_BREAK = re.compile(r"<br\s*/?>", re.I)
+_TABLE_SEPARATOR = re.compile(r"^\|[\s|:-]+\|$")
+# pymupdf4llm emits a few inline HTML tags; they are decoration, not content.
+_HTML_TAG = re.compile(r"</?[a-z]+\s*/?>", re.I)
 
 
 class ElementKind(StrEnum):
@@ -94,125 +115,22 @@ class PageElement:
         return self.kind is ElementKind.TABLE
 
 
-def _compact_rows(rows: list[list[str | None]]) -> list[list[str]]:
-    """Normalise a raw table into `[label, value, value, ...]` rows of uniform width.
-
-    Raw extraction pads tables with spacer columns and puts currency symbols in cells of
-    their own, so the same period lands in a different column on different rows::
-
-        Automotive sales              | $ | 78,509 | $ | 67,210 | $ | 44,125
-        Automotive regulatory credits | 1,790 |  | 1,776 |  | 1,465 |
-
-    Read as markdown that invites pairing a figure with the wrong year. Dropping the
-    non-data cells and left-packing what remains makes column position meaningful again.
-
-    Width is the most common value count rather than the maximum, so one malformed row
-    cannot widen the whole table. Rows carrying no values at all — section headings such
-    as "Cost of revenues" — are kept as labels with empty cells.
-    """
-    if not rows:
-        return []
-
-    split: list[tuple[str, list[str]]] = []
-    for row in rows:
-        cells = [(cell or "").strip() for cell in row]
-        label = _clean_text(cells[0]) if cells else ""
-        values = [_clean_text(c) for c in cells[1:] if c not in _NON_DATA_CELLS]
-        split.append((label, values))
-
-    counts = Counter(len(values) for _, values in split if values)
-    if not counts:
-        return [[label] for label, _ in split]
-    width = counts.most_common(1)[0][0]
-
-    packed: list[list[str]] = []
-    for label, values in split:
-        fitted = values[:width] + [""] * max(0, width - len(values))
-        packed.append([label, *fitted])
-    return packed
-
-
-def _find_year_header(preamble: str, column_count: int) -> list[str] | None:
-    """Recover year column headers from the caption, when they line up.
-
-    Statement pages print the periods above the table rather than inside it, so the
-    extracted table has no usable header. When the caption contains a bare run of years
-    matching the table's numeric column count, those years are the headers — attaching
-    them is what stops the model reading a 2021 figure as the current year.
-    """
-    run: list[str] = []
-    for line in preamble.splitlines():
-        if _YEAR_LINE.match(line):
-            run.append(line.strip())
-            continue
-        if run:
-            # A run ended. Accept it only if it matches the value-column count exactly.
-            if len(run) == column_count - 1:  # first column holds row labels
-                return run
-            run = []
-    if len(run) == column_count - 1:
-        return run
-    return None
-
-
-def _looks_like_header(row: list[str]) -> bool:
-    """Whether a row reads as column names rather than data.
-
-    Promoting a data row to the header is silent corruption: the figures survive but
-    markdown presents them as column labels, and the row itself stops reading as data.
-    """
-    values = [cell for cell in row[1:] if cell]
-    if not values:
-        return False
-    textual = sum(not re.search(r"\d", cell) for cell in values)
-    return textual / len(values) >= 0.6
-
-
-def _render_table(rows: list[list[str]], preamble: str) -> str:
-    """Render a table as markdown, using year headers from the caption when available."""
-    if not rows:
-        return ""
-
-    width = len(rows[0])
-    years = _find_year_header(preamble, width)
-
-    if years:
-        header = ["", *years]
-        body = rows
-    elif _looks_like_header(rows[0]):
-        header = rows[0]
-        body = rows[1:]
-    else:
-        # No recoverable header. An empty one keeps every data row as data; the periods
-        # are still named in the caption directly above.
-        header = [""] * width
-        body = rows
-
-    lines = [
-        "| " + " | ".join(header) + " |",
-        "|" + "|".join(["---"] * width) + "|",
-    ]
-    lines += ["| " + " | ".join(row) + " |" for row in body]
-    return "\n".join(lines)
-
-
-def _overlap_ratio(block: pymupdf.Rect, table: pymupdf.Rect) -> float:
-    intersection = block & table
-    if not intersection.is_valid or block.get_area() == 0:
-        return 0.0
-    return intersection.get_area() / block.get_area()
-
-
 def _repair_ligatures(text: str) -> str:
     """Expand ligatures, including one filing's mis-decoded glyphs."""
     for glyph, expansion in _UNICODE_LIGATURES.items():
         text = text.replace(glyph, expansion)
-    return _MISDECODED_PATTERN.sub(lambda m: _MISDECODED_LIGATURES[m.group(0)], text)
+    text = _MISDECODED_PATTERN.sub(lambda m: _MISDECODED_LIGATURES[m.group(0)], text)
+    return _REPLACEMENT_CHAR.sub(_expand_replacement_char, text)
 
 
 def _clean_text(text: str) -> str:
-    """Strip typographic filler and repair encoding damage."""
-    return _repair_ligatures(_DOT_LEADER.sub(" ", text)).strip()
+    """Strip markdown decoration and typographic filler, and repair encoding damage."""
+    text = _LINE_BREAK.sub(" ", text)
+    text = _HTML_TAG.sub("", text)
+    text = _HEADING.sub("", text)
+    text = _EMPHASIS.sub("", text)
+    text = _DOT_LEADER.sub(" ", text)
+    return _repair_ligatures(text).strip()
 
 
 def _is_page_furniture(text: str) -> bool:
@@ -221,72 +139,102 @@ def _is_page_furniture(text: str) -> bool:
     return len(stripped) <= 4 and bool(re.fullmatch(r"[\d\s|_.-]*", stripped))
 
 
-def _preamble_for(blocks: list[tuple], table_rect: pymupdf.Rect) -> tuple[str, set[int]]:
-    """Text sitting directly above a table: its title, units and period headers.
+def _is_table_row(line: str) -> bool:
+    return line.lstrip().startswith("|")
 
-    Returns the caption and the indices of the blocks it consumed. The caller skips those
-    in the prose pass — otherwise the caption is indexed twice, once inside the table
-    element and once as standalone prose, producing near-duplicate retrievals that crowd
-    out genuinely different context.
+
+def _take_caption(prose_lines: list[str]) -> tuple[str, list[str]]:
+    """Split trailing caption lines away from the prose preceding a table.
+
+    Walks upward from the table and stops at the first long line: that is the previous
+    paragraph, and everything above it belongs to the preceding text. Returns the caption
+    and the prose lines that remain.
     """
-    candidates: list[tuple[float, int, str]] = []
-    for index, (x0, y0, x1, y1, text, *_) in enumerate(blocks):
-        block = pymupdf.Rect(x0, y0, x1, y1)
-        above = y1 <= table_rect.y0 + 2
-        near = table_rect.y0 - y1 <= PREAMBLE_GAP_PT
-        horizontally_related = block.x0 < table_rect.x1 and block.x1 > table_rect.x0
-        if above and near and horizontally_related and text.strip():
-            candidates.append((y0, index, text.strip()))
-
-    # Walk upwards from the table. Stop at the first long block: that is the previous
-    # paragraph, and everything above it belongs to the preceding text, not this table.
-    found: list[tuple[float, str]] = []
-    consumed: set[int] = set()
+    caption: list[str] = []
     total = 0
-    for y0, index, text in sorted(candidates, reverse=True):
-        if len(text) > MAX_CAPTION_LINE_CHARS or total + len(text) > MAX_CAPTION_CHARS:
+    index = len(prose_lines)
+
+    for line in reversed(prose_lines):
+        stripped = _clean_text(line)
+        if not stripped:
+            index -= 1
+            continue
+        if len(stripped) > MAX_CAPTION_LINE_CHARS or total + len(stripped) > MAX_CAPTION_CHARS:
             break
-        found.append((y0, text))
-        consumed.add(index)
-        total += len(text)
+        caption.insert(0, stripped)
+        total += len(stripped)
+        index -= 1
 
-    return "\n".join(text for _, text in sorted(found)), consumed
+    return "\n".join(caption), prose_lines[:index]
 
 
-def extract_page_elements(page: pymupdf.Page, page_no: int) -> list[PageElement]:
-    """Split a page into table and prose elements, in reading order."""
-    elements: list[tuple[float, PageElement]] = []
-    blocks = page.get_text("blocks")
+def _prose_elements(lines: list[str], page_no: int) -> list[PageElement]:
+    """Split prose into paragraph-level elements, one per blank-line-separated block.
 
-    table_rects: list[pymupdf.Rect] = []
-    consumed_blocks: set[int] = set()
+    Granularity matters beyond tidiness: section headings such as "ITEM 1A. RISK FACTORS"
+    are their own paragraph, and heading detection only considers short elements. Emitting
+    one element per page buries every heading inside a multi-thousand-character block and
+    silently disables section labelling for the whole document.
+    """
+    elements: list[PageElement] = []
+    paragraph: list[str] = []
 
-    for table in page.find_tables().tables:
-        rect = pymupdf.Rect(table.bbox)
-        table_rects.append(rect)
+    def flush() -> None:
+        nonlocal paragraph
+        text = _clean_text("\n".join(paragraph))
+        if text and not _is_page_furniture(text):
+            elements.append(PageElement(ElementKind.PROSE, text, page_no))
+        paragraph = []
 
-        rows = _compact_rows(table.extract())
-        if len(rows) < 2:  # a single row is a layout artefact, not a table
+    for line in lines:
+        if line.strip():
+            paragraph.append(line)
+        else:
+            flush()
+    flush()
+    return elements
+
+
+def parse_page_markdown(markdown: str, page_no: int) -> list[PageElement]:
+    """Split one page's markdown into table and prose elements, in reading order."""
+    elements: list[PageElement] = []
+    prose: list[str] = []
+    table: list[str] = []
+
+    def close_table() -> None:
+        nonlocal prose, table
+        if not table:
+            return
+
+        # A lone row is a layout artefact, not a table; keep it as prose rather than
+        # emitting a one-row table that fusion would treat as a financial statement.
+        rows = [r for r in table if not _TABLE_SEPARATOR.match(r.strip())]
+        if len(rows) < 2:
+            prose.extend(table)
+            table = []
+            return
+
+        caption, remaining = _take_caption(prose)
+        elements.extend(_prose_elements(remaining, page_no))
+        prose = []
+
+        body = "\n".join(_clean_text(row) for row in table)
+        elements.append(
+            PageElement(ElementKind.TABLE, f"{caption}\n\n{body}" if caption else body, page_no)
+        )
+        table = []
+
+    for line in markdown.splitlines():
+        if _is_table_row(line):
+            table.append(line)
             continue
+        if table:
+            close_table()
+        prose.append(line)
 
-        preamble, consumed = _preamble_for(blocks, rect)
-        consumed_blocks |= consumed
-        rendered = _render_table(rows, preamble)
-        text = f"{preamble}\n\n{rendered}" if preamble else rendered
-        elements.append((rect.y0, PageElement(ElementKind.TABLE, text, page_no)))
-
-    for index, (x0, y0, x1, y1, text, *_) in enumerate(blocks):
-        if index in consumed_blocks:
-            continue
-        block = pymupdf.Rect(x0, y0, x1, y1)
-        # Skip anything already captured structurally, so content is not indexed twice.
-        if any(_overlap_ratio(block, r) >= TABLE_OVERLAP_RATIO for r in table_rects):
-            continue
-        cleaned = _clean_text(text)
-        if cleaned and not _is_page_furniture(cleaned):
-            elements.append((y0, PageElement(ElementKind.PROSE, cleaned, page_no)))
-
-    return [element for _, element in sorted(elements, key=lambda pair: pair[0])]
+    close_table()
+    elements.extend(_prose_elements(prose, page_no))
+    return elements
 
 
 def load_document(path: Path | str) -> tuple[FilingMetadata, list[PageElement]]:
@@ -299,9 +247,14 @@ def load_document(path: Path | str) -> tuple[FilingMetadata, list[PageElement]]:
     path = Path(path)
     metadata = extract_filing_metadata(path)
 
+    # to_markdown writes a progress bar to stdout, which would corrupt CLI output.
+    with contextlib.redirect_stdout(io.StringIO()):
+        pages = pymupdf4llm.to_markdown(str(path), page_chunks=True, show_progress=False)
+
     elements: list[PageElement] = []
-    with pymupdf.open(path) as doc:
-        for page_no in range(metadata.body_start_page, len(doc)):
-            elements.extend(extract_page_elements(doc[page_no], page_no))
+    for page_no, page in enumerate(pages):
+        if page_no < metadata.body_start_page:
+            continue
+        elements.extend(parse_page_markdown(page["text"], page_no))
 
     return metadata, elements

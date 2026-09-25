@@ -156,12 +156,19 @@ def detect_section_in_table(text: str) -> tuple[str, str] | None:
 
 
 def _toc_pages(elements: list[PageElement]) -> set[int]:
-    """Pages dense with Item headings, i.e. tables of contents."""
+    """Pages dense with Item headings, i.e. tables of contents.
+
+    Counts headings inside table rows as well as standalone ones: a filing's index is
+    often laid out as a table, and missing it means every entry is treated as a real
+    section start — and the word "Signatures" in that index is read as the end of the
+    filing body.
+    """
     per_page: dict[int, int] = {}
     for element in elements:
-        head = element.text if not element.is_table else _table_caption(element.text)
-        if _ITEM_HEADING.match(head):
-            per_page[element.page] = per_page.get(element.page, 0) + 1
+        lines = element.text.splitlines()
+        hits = sum(1 for line in lines if _ITEM_HEADING.match(line.strip().strip("|").strip()))
+        if hits:
+            per_page[element.page] = per_page.get(element.page, 0) + hits
     return {page for page, count in per_page.items() if count >= TOC_HEADING_DENSITY}
 
 
@@ -171,12 +178,15 @@ def _signature_page(elements: list[PageElement], toc_pages: set[int]) -> int | N
     Table-of-contents pages are excluded: they list "Signatures" as an entry, and
     treating that as the boundary would label the whole document as exhibits.
     """
+    # Take the last match, not the first. An index lists "Signatures" as an entry, and a
+    # cross-reference can mention it too; the real signature block is the final one.
+    found: int | None = None
     for element in elements:
         if element.page in toc_pages or element.is_table:
             continue
         if _SIGNATURES_HEADING.match(element.text.strip()):
-            return element.page
-    return None
+            found = element.page
+    return found
 
 
 def _split_table(text: str, limit: int) -> list[str]:
