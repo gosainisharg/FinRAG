@@ -98,13 +98,27 @@ finrag/
 > its own output in Phase 6.
 
 ### Phase 1 — Ingestion quality
-- [ ] PyMuPDF replaces PyPDF so financial tables survive extraction
-- [ ] Per-chunk metadata: `ticker`, `company`, `form_type`, `fiscal_year`, `filing_date`, `section`
-- [ ] Section-aware chunking on 10-K Item boundaries
-- [ ] Content-hash chunk IDs (edited documents actually update)
+- [x] PyMuPDF replaces PyPDF so financial tables survive extraction
+- [x] Per-chunk metadata: `ticker`, `company`, `form_type`, `fiscal_year`, `filing_date`, `section`
+- [x] Section-aware chunking on 10-K Item boundaries
+- [x] Content-hash chunk IDs (edited documents actually update)
 
-> **Exit:** the pipeline rebuilds cleanly from scratch, and a dump of 20 random chunks is
-> readable — filing and section identifiable for each, no table sliced mid-row.
+> **Exit: met.** `python -m finrag.ingestion.pipeline --reset` rebuilds 1,116 chunks in
+> ~2 min on MPS; `scripts/inspect_chunks.py` shows filing, section and page for every
+> chunk, with tables carrying their year headers and units and no row split.
+>
+> **What the corpus turned out to be** (the plan assumed six 10-Ks): three plain 10-Ks
+> (Apple FY23/FY24, Tesla FY23), one 10-K buried on page 6 of an annual report (Costco
+> FY23), and two Meta earnings press releases that have no Item sections at all.
+> Of 1,116 chunks, **286 are attached exhibits** — indentures, stock plans, trading
+> policies — now labelled so retrieval can exclude them rather than answering a revenue
+> question from a stock plan.
+>
+> **Limitation on record:** table detection needs ruling lines, so Costco's
+> whitespace-aligned statements fall through to prose (1 table vs Tesla's 56). The
+> `text` strategy was measured and rejected — it shatters headings mid-word and
+> hallucinates an 89-row table on every prose page. Costco's prose keeps label-value
+> adjacency, so it degrades rather than breaks.
 
 ### Phase 2 — Retrieval layer
 - [ ] `retrieve(query, strategy, filters, k) -> list[RetrievedChunk]` as the single entry point
