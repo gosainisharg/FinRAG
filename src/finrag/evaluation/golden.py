@@ -130,8 +130,39 @@ def load_golden(path: Path | None = None, verified_only: bool = True) -> list[Go
     return [q for q in questions if q.verified] if verified_only else questions
 
 
-def save_golden(questions: list[GoldenQuestion], path: Path | None = None) -> Path:
+class GoldenWriteError(RuntimeError):
+    """Raised when a write would discard verified ground truth."""
+
+
+def save_golden(
+    questions: list[GoldenQuestion],
+    path: Path | None = None,
+    *,
+    allow_verified_loss: bool = False,
+) -> Path:
+    """Write the golden set, refusing to silently discard verified questions.
+
+    The guard exists because of a real incident: a long-running generation process had
+    loaded the file before verification ran, and when it finally finished it wrote back
+    its own stale copy — erasing 39 verified questions with no error. Whole-file writes
+    from concurrent processes are the hazard, and verified ground truth is the expensive
+    thing to lose.
+
+    Callers that intentionally prune questions — the review tools, which delete rejects —
+    pass ``allow_verified_loss=True``.
+    """
     path = path or GOLDEN_PATH
+
+    if not allow_verified_loss and path.exists():
+        existing = {q.id for q in load_golden(path, verified_only=True)}
+        surviving = {q.id for q in questions}
+        lost = existing - surviving
+        if lost:
+            raise GoldenWriteError(
+                f"refusing to write {path}: would drop {len(lost)} verified question(s) "
+                f"({sorted(lost)[:5]}...). Pass allow_verified_loss=True if intended."
+            )
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(q.to_json() for q in questions) + "\n")
     return path

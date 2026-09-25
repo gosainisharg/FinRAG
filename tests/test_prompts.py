@@ -118,3 +118,59 @@ class TestFileContract:
         template = get_prompt("generate", "v1").template.lower()
         assert "units" in template
         assert "cite" in template
+
+
+class TestGoldenWriteGuard:
+    """Regression: a stale process wrote back its own copy and erased verified work."""
+
+    def test_refuses_to_drop_verified_questions(self, tmp_path):
+        from finrag.evaluation.golden import (
+            GoldenQuestion,
+            GoldenWriteError,
+            QuestionType,
+            Verification,
+            save_golden,
+        )
+
+        path = tmp_path / "golden.jsonl"
+        verified = GoldenQuestion(
+            id="q001",
+            question="?",
+            question_type=QuestionType.SINGLE_FACT,
+            answer="a",
+            verified=True,
+            verified_by=Verification.MODEL,
+        )
+        save_golden([verified], path)
+
+        stale = GoldenQuestion(
+            id="q002", question="?", question_type=QuestionType.SINGLE_FACT, answer="b"
+        )
+        with pytest.raises(GoldenWriteError, match="would drop 1 verified"):
+            save_golden([stale], path)
+
+    def test_pruning_is_allowed_when_requested(self, tmp_path):
+        from finrag.evaluation.golden import (
+            GoldenQuestion,
+            QuestionType,
+            Verification,
+            load_golden,
+            save_golden,
+        )
+
+        path = tmp_path / "golden.jsonl"
+        save_golden(
+            [
+                GoldenQuestion(
+                    id="q001",
+                    question="?",
+                    question_type=QuestionType.SINGLE_FACT,
+                    answer="a",
+                    verified=True,
+                    verified_by=Verification.MODEL,
+                )
+            ],
+            path,
+        )
+        save_golden([], path, allow_verified_loss=True)
+        assert load_golden(path, verified_only=False) == []

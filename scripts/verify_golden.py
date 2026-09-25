@@ -160,14 +160,14 @@ def main() -> int:
                 break
             if choice == "q":
                 kept = [q for q in everything if q.id not in rejected]
-                save_golden(kept)
+                save_golden(kept, allow_verified_loss=True)
                 verified = sum(q.verified for q in kept)
                 print(f"\nsaved. {verified}/{len(kept)} verified, {len(rejected)} rejected.")
                 return 0
             print("  choose a, e, r, s or q")
 
     kept = [q for q in everything if q.id not in rejected]
-    save_golden(kept)
+    save_golden(kept, allow_verified_loss=True)
     verified = sum(q.verified for q in kept)
     print(f"\n{BOLD}done.{OFF} {verified}/{len(kept)} verified, {len(rejected)} rejected.")
     return 0

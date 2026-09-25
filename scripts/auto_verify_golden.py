@@ -238,7 +238,7 @@ def main() -> int:
         print(f"\n{DIM}dry run — nothing written{OFF}")
         return 0
 
-    path = save_golden(kept)
+    path = save_golden(kept, allow_verified_loss=True)
     print(f"\nwritten to {path}")
     if review:
         print(f"{DIM}review the flagged ones: python scripts/verify_golden.py{OFF}")
