@@ -178,26 +178,34 @@ class TestRewriteNode:
 
 
 class TestGenerateNode:
-    def test_refuses_when_the_grader_rejected_the_context(self, fake_llm):
-        """Measured: given context the grader had rejected, the local generator answered
-        '$2,337 million' with answerable=True. Declining to call it is the guarantee."""
-        model = fake_llm(FinalAnswer(answer="$2,337 million", answerable=True, citations=[]))
+    def test_rejected_context_uses_the_cautious_prompt(self, fake_llm):
+        """Hard-refusing on the grader's verdict lost 9 of 33 answerable questions whose
+        evidence was in fact present. Generation proceeds, but under a prompt that names
+        what was reported missing, so grader and generator must both fail."""
+        model = fake_llm(
+            FinalAnswer(
+                answer="96,773 million",
+                answerable=True,
+                citations=["TSLA FY2023 Item 8 p50"],
+            )
+        )
         state = initial_state("q")
         state["chunks"] = [chunk()]
         state["grade"] = GradeResult(sufficient=False, missing="membership fee revenue")
 
         result = generate_node(state)
-        assert result["answerable"] is False
-        assert "membership fee revenue" in result["answer"]
-        assert not model.calls, "the model must not be asked to answer rejected context"
+        assert model.calls, "the generator must still get a second opinion"
+        assert "membership fee revenue" in model.calls[0], "the prompt must name what was missing"
+        assert result["answerable"] is True
 
-    def test_refusal_cites_what_was_searched(self, fake_llm):
-        fake_llm(FinalAnswer(answer="x", answerable=True))
+    def test_an_uncited_answer_is_discarded_even_on_the_cautious_path(self, fake_llm):
+        """The citation requirement is what stops the cautious path from reinstating
+        fabrication: observed once as '$2,337 million' lifted from an unrelated row."""
+        fake_llm(FinalAnswer(answer="$2,337 million", answerable=True, citations=[]))
         state = initial_state("q")
         state["chunks"] = [chunk()]
-        state["grade"] = GradeResult(sufficient=False, missing="y")
-        citations = generate_node(state)["citations"]
-        assert "TSLA FY2023 Item 8 p50" in citations
+        state["grade"] = GradeResult(sufficient=False, missing="membership fee revenue")
+        assert generate_node(state)["answerable"] is False
 
     def test_drops_fabricated_citations(self, fake_llm):
         """A fabricated citation is worse than a missing one: it survives casual checking."""
