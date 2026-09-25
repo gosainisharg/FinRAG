@@ -186,11 +186,22 @@ finrag/
 > overall row is the trustworthy one.
 
 ### Phase 4 — Prompt registry
-- [ ] Every prompt a versioned artifact fetched by version at runtime
-- [ ] Local-in-git as source of truth (deterministic CI); LangSmith hub as optional mirror
-- [ ] CoT / few-shot structure lives here
+- [x] Every prompt a versioned artifact fetched by version at runtime
+- [x] Local-in-git as source of truth (deterministic CI); LangSmith hub as optional mirror
+- [x] CoT / few-shot structure lives here
 
-> **Exit:** changing a prompt version string changes behaviour without touching node code.
+> **Exit: met.** `FINRAG_PROMPT_VERSIONS='{"grade": "v0"}'` swaps one prompt with no
+> code change; a test asserts it. Four prompts at v1 (route, grade, rewrite, generate),
+> plus `v0/grade.md` kept as the naive control from the Phase 0 experiment so the
+> engineered version can be measured rather than merely asserted to be better.
+>
+> Each prompt reports a checksum (`grade@v1#f7c3ecde07eb`). A version label can be
+> edited in place; a checksum cannot, so an eval number stays traceable to exact bytes.
+>
+> The loader fails if declared variables and body placeholders disagree — that drift is
+> how a node ends up passing an argument nothing consumes — and `render()` raises on a
+> missing variable rather than shipping a literal `{context}` to the model, which would
+> produce a plausible answer about nothing.
 
 **Measured during Phase 0** (5 grader cases x 3 trials, locally-served models, zero cost):
 
