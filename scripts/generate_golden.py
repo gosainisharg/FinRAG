@@ -89,9 +89,11 @@ EXCERPT B:
 
 def sample_chunks(store, n: int, seed: int, tables_only: bool = False) -> list[dict]:
     """Draw chunks worth asking about, spread across the filings."""
-    where = {"$and": [{"section": {"$in": list(USEFUL_SECTIONS)}}]}
+    # Chroma rejects $and with fewer than two expressions, so only wrap when needed.
+    clauses: list[dict] = [{"section": {"$in": list(USEFUL_SECTIONS)}}]
     if tables_only:
-        where["$and"].append({"element_kind": "table"})
+        clauses.append({"element_kind": "table"})
+    where = clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
     data = store.get(where=where, include=["documents", "metadatas"])
     pool = [
@@ -115,6 +117,35 @@ def sample_chunks(store, n: int, seed: int, tables_only: bool = False) -> list[d
             if bucket and len(spread) < n:
                 spread.append(bucket.pop())
     return spread
+
+
+def sample_pairs(store, n: int, seed: int) -> list[list[dict]]:
+    """Draw pairs of chunks from the *same* filing, for multi-hop questions.
+
+    Cannot reuse `sample_chunks`: it round-robins across tickers to spread coverage, so
+    consecutive chunks are always from different filings and no pair would ever be valid.
+    """
+    data = store.get(
+        where={"section": {"$in": list(USEFUL_SECTIONS)}},
+        include=["documents", "metadatas"],
+    )
+    by_source: dict[str, list[dict]] = {}
+    for text, metadata in zip(data["documents"], data["metadatas"], strict=True):
+        if len(text) > 400:
+            by_source.setdefault(metadata["source"], []).append(
+                {"text": text, "metadata": metadata}
+            )
+
+    rng = random.Random(seed)
+    for bucket in by_source.values():
+        rng.shuffle(bucket)
+
+    pairs: list[list[dict]] = []
+    while len(pairs) < n and any(len(b) >= 2 for b in by_source.values()):
+        for bucket in by_source.values():
+            if len(bucket) >= 2 and len(pairs) < n:
+                pairs.append([bucket.pop(), bucket.pop()])
+    return pairs
 
 
 def tokens_are_grounded(tokens: list[str], *texts: str) -> bool:
@@ -155,31 +186,26 @@ def main() -> int:
 
     store = open_vector_store()
     question_type = QuestionType(args.type)
-    per_question = 2 if question_type is QuestionType.MULTI_HOP else 1
-    chunks = sample_chunks(store, args.n * per_question, args.seed, args.tables_only)
+    if question_type is QuestionType.MULTI_HOP:
+        groups = sample_pairs(store, args.n, args.seed)
+    else:
+        groups = [[c] for c in sample_chunks(store, args.n, args.seed, args.tables_only)]
 
     existing = load_golden(verified_only=False) if args.append else []
     start_index = len(existing)
     accepted: list[GoldenQuestion] = []
     rejected = 0
 
-    for i in range(args.n):
-        group = chunks[i * per_question : (i + 1) * per_question]
-        if len(group) < per_question:
-            break
+    for group in groups:
         meta = group[0]["metadata"]
 
         if question_type is QuestionType.MULTI_HOP:
-            # Both excerpts must come from the same filing or the question is not multi-hop
-            # within one document; skip mismatched pairs rather than produce a bad prompt.
-            if group[1]["metadata"].get("source") != meta.get("source"):
-                continue
             prompt = MULTI_HOP_PROMPT.format(
                 company=meta.get("company"),
                 form=meta.get("form_type"),
                 year=meta.get("fiscal_year"),
-                text_a=group[0]["text"][:2000],
-                text_b=group[1]["text"][:2000],
+                text_a=group[0]["text"][:1200],
+                text_b=group[1]["text"][:1200],
             )
         else:
             prompt = SINGLE_FACT_PROMPT.format(

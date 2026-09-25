@@ -59,3 +59,6 @@ htmlcov/
 Thumbs.db
 .idea/
 .vscode/
+
+# Provisional eval reports (unverified questions) — the committed one is eval/results/retrieval_baseline.md
+eval/results/*_provisional.md
