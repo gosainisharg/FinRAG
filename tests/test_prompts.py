@@ -56,10 +56,11 @@ class TestVersionSwitching:
         """The Phase 4 exit criterion: behaviour changes without touching node code."""
         from finrag.config import get_settings
 
+        settings = get_settings()
         get_prompt.cache_clear()
-        assert get_prompt("grade").version == "v1"
+        assert get_prompt("grade").version == settings.prompt_version
 
-        monkeypatch.setattr(get_settings(), "prompt_versions", {"grade": "v0"})
+        monkeypatch.setattr(settings, "prompt_versions", {"grade": "v0"})
         get_prompt.cache_clear()
         assert get_prompt("grade").version == "v0"
 
