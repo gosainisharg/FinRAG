@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     # Prompts are versioned artifacts on disk. Bumping this swaps every prompt at once;
     # prompt_versions overrides individual ones, which is how the eval compares a single
     # prompt change without moving anything else.
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"
     prompt_versions: dict[str, str] = Field(default_factory=dict)
 
     # ------------------------------------------------------------------ graph

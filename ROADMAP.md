@@ -223,14 +223,34 @@ This is the empirical case for versioning prompts and evaluating them, and it be
 the README.
 
 ### Phase 5 — The agentic graph
-- [ ] `GraphState` with attempt counter
-- [ ] Nodes: route → retrieve → grade → rewrite → generate
-- [ ] Conditional edges; retries capped at 2
-- [ ] Router and grader emit Pydantic-structured decisions
-- [ ] Checkpointer wired
+- [x] `GraphState` with attempt counter
+- [x] Nodes: route → retrieve → grade → rewrite → generate
+- [x] Conditional edges; retries capped at 2
+- [x] Router and grader emit Pydantic-structured decisions
+- [x] Checkpointer wired
 
-> **Exit:** the Phase 3 eval re-runs through the graph and the results table gains a
-> **before/after column**.
+> **Exit: partially met.** The graph runs end to end and answers correctly with citations
+> — Tesla revenue in 15s via `route → retrieve → grade → generate`, no retries. The
+> before/after eval column lands in Phase 6 alongside the LLM-judge harness.
+>
+> **Prompt ordering was worth 3/6 → 6/6.** The v1 grader put the question *before* an
+> 8,600-character context and consistently answered `sufficient: false` even when the
+> right table was retrieved — so every question exhausted the retry budget, tripling
+> latency. Moving the question after the context fixed it. v2 is the default; v1 is kept
+> for the comparison. This is the prompt registry earning its place in its first week.
+>
+> **Refusal is decided in code, not requested of the model.** Handed context the grader
+> had already rejected, the local generator answered "$2,337 million" with
+> `answerable=True` and a citation — a figure lifted from an unrelated line item. The
+> generate node now declines to call the model at all in that case. The cost is that a
+> wrong grader blocks a good answer, which puts grader accuracy on the critical path;
+> that is the right place for the risk, since a missed answer is visible and a
+> fabricated financial figure is not.
+>
+> **Routed filters relax progressively** — sections, then years, then tickers. The router
+> put a Costco membership-fee question in Item 7 (it is Item 6/8), matching zero chunks;
+> a filter that matches nothing is worse than no filter, because the right document is
+> never considered.
 
 ### Phase 5b — LLaMA backend
 - [x] Third provider wired (LLaMA, served locally via Ollama) — *pulled forward into Phase 0*
