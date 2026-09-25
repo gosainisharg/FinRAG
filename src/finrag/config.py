@@ -100,12 +100,17 @@ class Settings(BaseSettings):
     rerank_top_n: int = 5
     # Weight of the dense arm in reciprocal rank fusion; 0.5 is an even blend.
     hybrid_dense_weight: float = 0.5
+    # Chunks fetched per company for a comparison question. Measured over four
+    # cross-company questions: 2 each found both figures 1/4 of the time, 4 each 2/4,
+    # 8 each 3/4. A comparison needs more context than a single-company question, not
+    # the same budget split between them.
+    comparison_chunks_per_company: int = 8
 
     # ------------------------------------------------------------------ prompts
     # Prompts are versioned artifacts on disk. Bumping this swaps every prompt at once;
     # prompt_versions overrides individual ones, which is how the eval compares a single
     # prompt change without moving anything else.
-    prompt_version: str = "v2"
+    prompt_version: str = "v4"
     prompt_versions: dict[str, str] = Field(default_factory=dict)
 
     # ------------------------------------------------------------------ graph

@@ -262,13 +262,44 @@ the README.
 > machine.
 
 ### Phase 6 — LLM-as-judge evaluation
-- [ ] RAGAS: faithfulness · answer relevancy · context precision · context recall
-- [ ] DeepEval G-Eval rubric for financial answers: numeric accuracy · citations · hedging
-- [ ] Judge model from a different family than the generator (self-preference bias)
-- [ ] `run_eval.py` emits a markdown results table
-- [ ] `test_quality.py` fails on threshold breach
+- [x] RAGAS: faithfulness · answer relevancy · context precision · context recall
+- [x] DeepEval G-Eval rubric for financial answers: numeric accuracy · citations · hedging
+- [x] Judge model from a different family than the generator (self-preference bias)
+- [x] `run_eval.py` emits a markdown results table
+- [x] `test_quality.py` fails on threshold breach
 
-> **Exit:** both metric-based and LLM-as-judge scores are reproducible from one command.
+> **Exit: met.** `eval/results/agentic_eval.md`, reproducible from
+> `run_graph_eval` → `answer_metrics` → `report`. Execution is separated from scoring so a
+> rubric change never re-pays for generation.
+>
+> **The agentic loop did not improve retrieval.** Same metrics, same questions:
+>
+> | | hit-rate@5 | MRR | precision | recall |
+> |---|---|---|---|---|
+> | retrieval baseline (hybrid, no loop) | 0.970 | 0.755 | 0.339 | 0.939 |
+> | agentic graph | 0.939 | 0.696 | 0.328 | 0.894 |
+>
+> Slightly worse, and the cause is the router: its metadata filters narrow the search
+> and occasionally exclude the right filing. What the loop *does* add is the thing the
+> baseline cannot do at all — produce an answer, cite it, and decline when the evidence
+> is absent. **6/6 unanswerable questions refused with no fabricated figures**, 25/33
+> answerable ones answered, mean latency 7.3s, 18/39 runs triggered a corrective
+> re-query. Report the loop as what it measurably is: a correctness-and-refusal layer,
+> not a retrieval improvement.
+>
+> **Answer quality** (judge from a different family than the generator):
+> faithfulness 0.921 (38/39 scored) · response relevancy 0.852 (31/39) · context recall
+> 0.821 (39/39) · financial rigour 0.603 (39/39). RAGAS context-precision parsed on only
+> 8/39 and is **not reported** — a mean over 8 samples with a 79% failure rate is not a
+> measurement.
+>
+> Financial rigour by type: unanswerable 0.974 (correct refusals score highest),
+> single-fact 0.566, cross-company 0.496, multi-hop 0.419. Multi-hop is the weakest and
+> the obvious next target.
+>
+> **Known dependency issue:** RAGAS 0.4.3 imports a module langchain-community 0.4
+> removed, so it cannot be imported on a current stack. `evaluation/compat.py` stubs it;
+> nothing here uses Vertex AI. Remove the shim when RAGAS fixes the import.
 
 ### Phase 7 — Guardrails
 - [ ] Input: scope classification · injection detection · PII

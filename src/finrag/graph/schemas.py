@@ -45,11 +45,10 @@ class RouteDecision(BaseModel):
         description="Fiscal years the question is restricted to. Leave empty unless the "
         "question names a period.",
     )
-    sections: list[str] = Field(
-        default_factory=list,
-        description="10-K sections to restrict to, e.g. 'Item 1A'. Leave empty unless the "
-        "question clearly targets one.",
-    )
+    # Section filtering was measured and removed. Over 33 answerable questions, letting
+    # the router choose a 10-K section dropped evidence-in-top-5 from 0.848 to 0.606 — it
+    # put Japan net sales in Item 8 when the discussion is in Item 7, and once emitted
+    # "10-K", which is not a section at all. Tickers cost nothing; sections cost 24 points.
     reasoning: str = Field(default="", description="One sentence explaining the choice")
 
 
@@ -82,9 +81,14 @@ class FinalAnswer(BaseModel):
     answer: str = Field(
         description="The answer, or a plain statement that it is not in the filings"
     )
+    # Defaulted rather than required: one run failed validation entirely because the
+    # model omitted the field, losing an otherwise good answer. Optimistic is safe here
+    # because generate_node independently requires a surviving citation before marking
+    # anything answerable.
     answerable: bool = Field(
+        default=True,
         description="False if the context did not contain the answer. Set this honestly — "
-        "an unanswerable question answered confidently is the worst outcome."
+        "an unanswerable question answered confidently is the worst outcome.",
     )
     citations: list[str] = Field(
         default_factory=list,

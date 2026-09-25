@@ -71,7 +71,6 @@ def _filters_from(decision: RouteDecision | None) -> Filters:
     return Filters(
         tickers=tuple(t.upper() for t in decision.tickers),
         fiscal_years=tuple(decision.fiscal_years),
-        sections=tuple(decision.sections),
     )
 
 
@@ -105,9 +104,35 @@ def retrieve_node(state: GraphState) -> GraphState:
     decision = state.get("route")
     strategy = Strategy(decision.strategy) if decision else Strategy.HYBRID
 
+    filters = _filters_from(decision)
+
+    # A comparison needs evidence from every company it names. One pooled search does not
+    # provide that: measured over four cross-company questions, a single top-5 returned
+    # both companies' figures zero times, because the strongest matches all come from
+    # whichever filing phrases the metric most like the question. Searching per company
+    # and merging takes that to 3/4. This is still one retrieval step, not a sub-agent.
+    if len(filters.tickers) > 1:
+        per_company = settings.comparison_chunks_per_company
+        chunks = []
+        for ticker in filters.tickers:
+            chunks.extend(
+                retrieve(
+                    state["search_query"],
+                    strategy,
+                    replace(filters, tickers=(ticker,)),
+                    k=per_company,
+                )
+            )
+        if chunks:
+            return {
+                "chunks": chunks,
+                "filters_used": f"per-company ({len(filters.tickers)})",
+                "path": _note(state, "retrieve"),
+            }
+
     chunks: list[RetrievedChunk] = []
     used = "as routed"
-    for label, candidate in _relaxations(_filters_from(decision)):
+    for label, candidate in _relaxations(filters):
         chunks = retrieve(state["search_query"], strategy, candidate, k=settings.rerank_top_n)
         used = label
         if chunks:
@@ -214,28 +239,30 @@ def generate_node(state: GraphState) -> GraphState:
             "path": _note(state, "generate"),
         }
 
+    # When the grader rejected the context, generation still happens — but under a prompt
+    # that names what was reported missing and requires citations. Measured: hard-refusing
+    # on the grader's verdict lost 9 of 33 answerable questions whose evidence was in fact
+    # present, because the grader has a high false-negative rate on long contexts. Making
+    # it a single point of failure traded one error for a more common one. Both the grader
+    # and the generator must now fail together, and an uncited answer is discarded either
+    # way.
     grade = state.get("grade")
-    if grade is not None and not grade.sufficient:
-        missing = grade.missing or "the specific figures the question asks for"
-        found = ", ".join(sorted({chunk.citation for chunk in chunks})[:3])
-        return {
-            "answer": (
-                f"The filings I searched do not appear to contain {missing}. "
-                f"The closest material I found was in {found}."
-            ),
-            "answerable": False,
-            # Cite what was searched, so the refusal can be checked rather than trusted.
-            "citations": sorted({chunk.citation for chunk in chunks})[:3],
-            "path": _note(state, "generate"),
-        }
+    cautious = grade is not None and not grade.sufficient
+    prompt = (
+        get_prompt("generate_cautious").render(
+            question=state["question"],
+            context=format_context(chunks),
+            missing=grade.missing or "not specified",
+        )
+        if cautious
+        else get_prompt("generate").render(
+            question=state["question"], context=format_context(chunks)
+        )
+    )
 
     try:
         model = get_chat_model(ModelRole.GENERATOR).with_structured_output(FinalAnswer)
-        result = model.invoke(
-            get_prompt("generate").render(
-                question=state["question"], context=format_context(chunks)
-            )
-        )
+        result = model.invoke(prompt)
     except Exception as exc:  # noqa: BLE001
         logger.error("generator failed: %s", exc)
         return {
