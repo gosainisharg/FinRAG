@@ -88,7 +88,12 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------ retrieval
     embedding_model: str = "BAAI/bge-large-en-v1.5"
-    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    # Both rerankers are sanctioned by the spec. Measured on three questions over this
+    # corpus, ms-marco returned an identical top-1 to bge-reranker-v2-m3 at ~395ms mean
+    # versus ~5,100ms — 13x faster for no visible loss, and 5s/query is not viable behind
+    # a streaming endpoint. Phase 3 settles it on the golden set; swap via this setting.
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-12-v2"
+    alternate_reranker_model: str = "BAAI/bge-reranker-v2-m3"
     # Candidates pulled from each retriever before fusion.
     retrieval_k: int = 20
     # Documents surviving the cross-encoder, i.e. what reaches the prompt.

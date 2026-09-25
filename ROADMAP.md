@@ -121,15 +121,26 @@ finrag/
 > adjacency, so it degrades rather than breaks.
 
 ### Phase 2 — Retrieval layer
-- [ ] `retrieve(query, strategy, filters, k) -> list[RetrievedChunk]` as the single entry point
-- [ ] Dense (Chroma + bge-large-en-v1.5)
-- [ ] Sparse (BM25) — genuinely keyword-based, not a second dense pass
-- [ ] Hybrid via reciprocal rank fusion
-- [ ] Cross-encoder rerank (`bge-reranker-v2-m3`)
-- [ ] Models loaded once as singletons
+- [x] `retrieve(query, strategy, filters, k) -> list[RetrievedChunk]` as the single entry point
+- [x] Dense (Chroma + bge-large-en-v1.5)
+- [x] Sparse (BM25) — genuinely keyword-based, not a second dense pass
+- [x] Hybrid via reciprocal rank fusion
+- [x] Cross-encoder rerank — **default switched to `ms-marco-MiniLM-L-12-v2`**
+- [x] Models loaded once as singletons
 
-> **Exit:** a CLI runs one question through every strategy side by side; unit tests pass with no
-> network calls.
+> **Exit: met.** `scripts/compare_retrieval.py` runs a question through all five strategies
+> with per-stage scores and latencies; 41 retrieval tests, the pure-function ones needing
+> no index at all.
+>
+> **Reranker choice, measured:** `bge-reranker-v2-m3` averaged ~5,100ms per query against
+> `ms-marco-MiniLM-L-12-v2`'s ~395ms — 13x slower — and returned an identical top-1 on
+> every test question. Five seconds per query is not viable behind a streaming endpoint,
+> so ms-marco is the default and bge stays configurable. Phase 3 settles it on the golden
+> set rather than on three questions.
+>
+> **Latency by strategy** (warm, k=3): sparse ~16ms · hybrid ~50ms · dense ~30ms ·
+> hybrid+rerank ~400ms. Worth knowing before the semantic cache in Phase 8 — most of the
+> budget is the cross-encoder, not the search.
 
 ### Phase 3 — Golden set + retrieval baseline
 - [ ] 30–40 Q&A pairs over 4–5 filings, LLM-drafted then hand-verified
