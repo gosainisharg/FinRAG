@@ -24,6 +24,7 @@ import sys
 from finrag.evaluation.golden import (
     GoldenQuestion,
     QuestionType,
+    Verification,
     load_golden,
     normalise_number,
     save_golden,
@@ -146,6 +147,7 @@ def main() -> int:
             choice = input(f"\n  {BOLD}[a/e/r/s/q]{OFF} ").strip().lower() or "s"
             if choice == "a":
                 question.verified = True
+                question.verified_by = Verification.HUMAN
                 break
             if choice == "e":
                 prompt_edit(question)

@@ -15,10 +15,16 @@ import argparse
 import logging
 import sys
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from finrag.evaluation.golden import GoldenQuestion, QuestionType, load_golden
+from finrag.evaluation.golden import (
+    GoldenQuestion,
+    QuestionType,
+    Verification,
+    load_golden,
+)
 from finrag.evaluation.retrieval_metrics import (
     QuestionResult,
     RetrievalMetrics,
@@ -64,6 +70,7 @@ def render_report(
     provisional: bool,
 ) -> str:
     counts = {t.value: sum(1 for q in questions if q.question_type is t) for t in QuestionType}
+    provenance = Counter(str(q.verified_by) for q in questions)
     lines = [
         "# Retrieval baseline",
         "",
@@ -80,6 +87,20 @@ def render_report(
     lines += [
         "Question mix: " + " · ".join(f"{name} {count}" for name, count in counts.items() if count),
         "",
+        "Ground-truth provenance: "
+        + " · ".join(f"{name} {count}" for name, count in provenance.items()),
+        "",
+    ]
+    if provenance.get(str(Verification.MODEL)):
+        lines += [
+            "> Questions marked `model-verified` were checked against their source text by a "
+            "frontier model from a different family than the one that drafted them — not by a "
+            "human. That is materially stronger than an unchecked set and materially weaker "
+            "than a reviewed one. Describe it as model-verified wherever these numbers are "
+            "quoted.",
+            "",
+        ]
+    lines += [
         "## Overall (answerable questions)",
         "",
         "| strategy | hit-rate@k | MRR | precision | recall | n |",

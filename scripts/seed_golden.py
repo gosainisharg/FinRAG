@@ -37,7 +37,7 @@ META_Q4 = "Meta-12-31-2023-Exhibit-99-1-FINAL.pdf"
 CROSS_COMPANY = [
     (
         "Which reported higher total revenue in fiscal 2023, Tesla or Costco, and by how much?",
-        "Costco: $242,290M versus Tesla's $96,773M",
+        "Costco $242,290M versus Tesla $96,773M — Costco higher by $145,517M",
         ["242,290", "96,773"],
         ["COST", "TSLA"],
         [2023],

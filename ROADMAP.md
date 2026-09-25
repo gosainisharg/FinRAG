@@ -156,12 +156,34 @@ finrag/
 > budget is the cross-encoder, not the search.
 
 ### Phase 3 — Golden set + retrieval baseline
-- [ ] 30–40 Q&A pairs over 4–5 filings, LLM-drafted then hand-verified
-- [ ] Four question classes: single-fact · multi-hop · cross-company · unanswerable
-- [ ] Metrics: hit-rate@k · MRR · context precision · context recall
+- [x] 39 Q&A pairs over 6 filings, LLM-drafted then **model-verified** (not human)
+- [x] Four question classes: single-fact · multi-hop · cross-company · unanswerable
+- [x] Metrics: hit-rate@k · MRR · context precision · context recall
 
-> **Exit:** a committed baseline table (semantic vs BM25 vs hybrid vs hybrid+rerank) with real
-> measured numbers and no agentic machinery involved.
+> **Exit: met.** `eval/results/retrieval_baseline.md`, measured with no agentic machinery.
+>
+> | strategy | hit-rate@5 | MRR | precision | recall | latency |
+> |---|---|---|---|---|---|
+> | dense | 0.818 | 0.674 | 0.285 | 0.758 | 184ms |
+> | sparse | 0.848 | 0.628 | 0.255 | 0.758 | **3ms** |
+> | **hybrid** | **0.970** | **0.755** | **0.339** | **0.939** | 77ms |
+> | dense_rerank | 0.909 | 0.710 | 0.303 | 0.848 | 556ms |
+> | hybrid_rerank | 0.879 | 0.706 | 0.291 | 0.833 | 514ms |
+>
+> **The cross-encoder makes retrieval worse here.** Hybrid 0.970 falls to 0.879 once the
+> reranker reorders it, at 7x the latency. Consistent with the Phase 2 suspicion that
+> cross-encoders trained on natural-language passages under-rate markdown tables — which
+> is exactly where financial figures live. Worth stating in the README as a measured
+> decision rather than quietly keeping a stage that costs latency and recall.
+>
+> **Provenance caveat:** ground truth is *model-verified*, not human-verified. A frontier
+> model from a different family than the drafter checked each answer against its source
+> chunk; it rejected 5 questions and corrected the answer tokens on 6, including one
+> hand-authored question whose stated answer did not actually answer what was asked.
+> Stronger than unchecked, weaker than reviewed. Say *model-verified* when quoting these.
+>
+> Per-type cells (4 cross-company, 5 multi-hop) are too small to carry conclusions; the
+> overall row is the trustworthy one.
 
 ### Phase 4 — Prompt registry
 - [ ] Every prompt a versioned artifact fetched by version at runtime

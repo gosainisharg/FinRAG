@@ -26,6 +26,19 @@ from pathlib import Path
 GOLDEN_PATH = Path(__file__).resolve().parents[3] / "eval" / "golden" / "finrag_golden.jsonl"
 
 
+class Verification(StrEnum):
+    """Who confirmed a question's ground truth.
+
+    Recorded rather than collapsed into a boolean because the distinction is a claim
+    about the evidence. A model-checked set is far stronger than an unchecked one and
+    strictly weaker than a human-checked one, and the README has to say which it is.
+    """
+
+    NONE = "unverified"
+    MODEL = "model-verified"
+    HUMAN = "human-verified"
+
+
 class QuestionType(StrEnum):
     """Deliberately mixed, because each exercises a different failure mode.
 
@@ -62,6 +75,7 @@ class GoldenQuestion:
     fiscal_years: list[int] = field(default_factory=list)
     expected_pages: list[dict] = field(default_factory=list)
     verified: bool = False
+    verified_by: Verification = Verification.NONE
     notes: str = ""
 
     @property
@@ -87,12 +101,14 @@ class GoldenQuestion:
     def to_json(self) -> str:
         payload = asdict(self)
         payload["question_type"] = str(self.question_type)
+        payload["verified_by"] = str(self.verified_by)
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
     def from_dict(cls, payload: dict) -> GoldenQuestion:
         payload = dict(payload)
         payload["question_type"] = QuestionType(payload["question_type"])
+        payload["verified_by"] = Verification(payload.get("verified_by", Verification.NONE))
         return cls(**payload)
 
 
